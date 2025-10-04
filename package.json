@@ -6,7 +6,7 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "6.4.0",
+    "@whiskeysockets/baileys": "5.0.0",
     "qrcode-terminal": "^0.12.0"
   }
 }
