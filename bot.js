@@ -1,62 +1,90 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 
-console.log('🚀 STARTING WHATSAPP BOT - whatsapp-web.js VERSION');
+console.log('🚀 STARTING WHATSAPP BOT - BAILEYS VERSION');
 
-// Cloud-optimized Puppeteer configuration
-const client = new Client({
-    authStrategy: new LocalAuth({
-        clientId: "whatsapp-bot"
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--single-process',
-            '--disable-features=VizDisplayCompositor'
-        ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+// Clear previous sessions
+if (fs.existsSync('./auth_info_baileys')) {
+    console.log('🧹 Clearing previous session...');
+}
+
+async function connectToWhatsApp() {
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+        const { version, isLatest } = await fetchLatestBaileysVersion();
+        
+        console.log(`Using Baileys version ${version.join('.')}, isLatest: ${isLatest}`);
+
+        const sock = makeWASocket({
+            version,
+            auth: state,
+            printQRInTerminal: true,
+            connectTimeoutMs: 60000,
+            keepAliveIntervalMs: 10000,
+            browser: ['Ubuntu', 'Chrome', '20.0.04'],
+            logger: {
+                level: 'silent'
+            }
+        });
+
+        sock.ev.on('creds.update', saveCreds);
+
+        sock.ev.on('connection.update', (update) => {
+            const { connection, lastDisconnect, qr } = update;
+            
+            if (qr) {
+                console.log('📱 QR CODE - Scan with WhatsApp:');
+                qrcode.generate(qr, { small: true });
+            }
+
+            if (connection === 'close') {
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                
+                console.log('Connection closed, reconnecting:', shouldReconnect);
+                
+                if (shouldReconnect) {
+                    console.log('🔄 Reconnecting in 5 seconds...');
+                    setTimeout(() => connectToWhatsApp(), 5000);
+                }
+            } else if (connection === 'open') {
+                console.log('✅ WHATSAPP CONNECTED SUCCESSFULLY!');
+            }
+        });
+
+        sock.ev.on('messages.upsert', async (m) => {
+            const msg = m.messages[0];
+            if (!msg.message || msg.key.fromMe) return;
+
+            const jid = msg.key.remoteJid;
+            const senderName = msg.pushName || "User";
+            const messageContent = (msg.message.conversation || '').trim().toLowerCase();
+
+            console.log(`📨 Message from ${senderName}: ${messageContent}`);
+
+            if (messageContent === 'hi' || messageContent === 'hello' || messageContent === 'menu') {
+                await sock.sendMessage(jid, { 
+                    text: `Hello ${senderName}! 👋\n\nWelcome to Sit n' Eat! 🍕\n\nType *menu* to see our delicious food options!` 
+                });
+            }
+        });
+
+    } catch (error) {
+        console.error('Connection error:', error);
+        console.log('🔄 Retrying in 10 seconds...');
+        setTimeout(() => connectToWhatsApp(), 10000);
     }
-});
+}
 
-client.on('qr', (qr) => {
-    console.log('📱 QR CODE RECEIVED - SCAN WITH WHATSAPP:');
-    qrcode.generate(qr, { small: true });
-});
+// Start the bot
+connectToWhatsApp();
 
-client.on('ready', () => {
-    console.log('✅ WHATSAPP CLIENT IS READY AND CONNECTED!');
-});
-
-client.on('authenticated', () => {
-    console.log('🔐 AUTHENTICATED SUCCESSFULLY!');
-});
-
-client.on('auth_failure', (msg) => {
-    console.log('❌ AUTH FAILED:', msg);
-});
-
-client.on('disconnected', (reason) => {
-    console.log('❌ DISCONNECTED:', reason);
-    console.log('🔄 RECONNECTING...');
-    client.initialize();
-});
-
-client.on('message', async (message) => {
-    console.log('Message from:', message.from, 'Content:', message.body);
-    await message.reply('Hello! Bot is working! 🎉 Type "menu" to see options.');
-});
-
-// Initialize client
-client.initialize();
-
-// Error handling
+// Keep alive
 process.on('unhandledRejection', (err) => {
     console.log('Unhandled Rejection:', err);
 });
