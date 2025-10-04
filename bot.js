@@ -5,21 +5,15 @@ const {
     fetchLatestBaileysVersion
 } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
-const fs = require('fs');
 
-console.log('🚀 STARTING WHATSAPP BOT - BAILEYS VERSION');
-
-// Clear previous sessions
-if (fs.existsSync('./auth_info_baileys')) {
-    console.log('🧹 Clearing previous session...');
-}
+console.log('🚀 STARTING WHATSAPP BOT - BAILEYS V6');
 
 async function connectToWhatsApp() {
     try {
         const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
         const { version, isLatest } = await fetchLatestBaileysVersion();
         
-        console.log(`Using Baileys version ${version.join('.')}, isLatest: ${isLatest}`);
+        console.log(`✅ Using Baileys version ${version.join('.')}, isLatest: ${isLatest}`);
 
         const sock = makeWASocket({
             version,
@@ -27,9 +21,11 @@ async function connectToWhatsApp() {
             printQRInTerminal: true,
             connectTimeoutMs: 60000,
             keepAliveIntervalMs: 10000,
-            browser: ['Ubuntu', 'Chrome', '20.0.04'],
-            logger: {
-                level: 'silent'
+            // Remove logger completely to avoid the child function error
+            getMessage: async (key) => {
+                return {
+                    conversation: 'hello'
+                }
             }
         });
 
@@ -46,36 +42,38 @@ async function connectToWhatsApp() {
             if (connection === 'close') {
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 
-                console.log('Connection closed, reconnecting:', shouldReconnect);
+                console.log('Connection closed due to:', lastDisconnect?.error?.message);
+                console.log('Reconnecting:', shouldReconnect);
                 
                 if (shouldReconnect) {
                     console.log('🔄 Reconnecting in 5 seconds...');
                     setTimeout(() => connectToWhatsApp(), 5000);
                 }
             } else if (connection === 'open') {
-                console.log('✅ WHATSAPP CONNECTED SUCCESSFULLY!');
+                console.log('✅ WHATSAPP CONNECTED SUCCESSFULLY! Bot is now ready.');
             }
         });
 
+        // Simple message handler
         sock.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             if (!msg.message || msg.key.fromMe) return;
 
             const jid = msg.key.remoteJid;
-            const senderName = msg.pushName || "User";
-            const messageContent = (msg.message.conversation || '').trim().toLowerCase();
+            const senderName = msg.pushName || "Customer";
+            const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
 
-            console.log(`📨 Message from ${senderName}: ${messageContent}`);
+            console.log(`📨 Message from ${senderName}: ${messageText}`);
 
-            if (messageContent === 'hi' || messageContent === 'hello' || messageContent === 'menu') {
+            if (messageText.toLowerCase().includes('hi') || messageText.toLowerCase().includes('hello') || messageText.toLowerCase() === 'menu') {
                 await sock.sendMessage(jid, { 
-                    text: `Hello ${senderName}! 👋\n\nWelcome to Sit n' Eat! 🍕\n\nType *menu* to see our delicious food options!` 
+                    text: `Hello ${senderName}! 👋\n\nWelcome to *Sit n' Eat*! 🍕\n\nI'm your food ordering assistant. Here's what you can do:\n\n• Type *menu* to see food categories\n• Type *order* to start ordering\n• We have pizza, burgers, drinks and more!\n\nHow can I help you today? 😊` 
                 });
             }
         });
 
     } catch (error) {
-        console.error('Connection error:', error);
+        console.error('❌ Connection error:', error.message);
         console.log('🔄 Retrying in 10 seconds...');
         setTimeout(() => connectToWhatsApp(), 10000);
     }
@@ -84,7 +82,7 @@ async function connectToWhatsApp() {
 // Start the bot
 connectToWhatsApp();
 
-// Keep alive
+// Error handling
 process.on('unhandledRejection', (err) => {
     console.log('Unhandled Rejection:', err);
 });
